@@ -1,0 +1,79 @@
+name: prebuild-test-all
+
+on:
+  workflow_dispatch:
+
+jobs:
+  prebuild:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: linux-x64
+          - os: ubuntu-22.04-arm
+            target: linux-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: macos-15
+            target: darwin-arm64
+          - os: windows-2022
+            target: win32-x64
+          - os: windows-11-arm
+            target: win32-arm64
+    name: Prebuild ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - if: ${{ startsWith(matrix.os, 'windows') }}
+        run: pip.exe install setuptools
+      - if: ${{ startsWith(matrix.os, 'macos') }}
+        run: brew install python-setuptools
+      - if: ${{ startsWith(matrix.os, 'ubuntu') }}
+        run: python3 -m pip install setuptools
+      - run: npm install --ignore-scripts
+      - run: npm run build-release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: build/Release/better_sqlite3.node
+          if-no-files-found: error
+
+  prebuild-alpine:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            target: linuxmusl-x64
+            os: ubuntu-24.04
+          - platform: linux/arm64
+            target: linuxmusl-arm64
+            os: ubuntu-24.04-arm
+    name: Prebuild ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - name: Build in Alpine
+        run: |
+          docker run --rm \
+            --platform ${{ matrix.platform }} \
+            --volume "${{ github.workspace }}:/project" \
+            --workdir /project \
+            node:22-alpine \
+            sh -c "apk add --no-cache build-base python3 py3-setuptools && \
+              npm install --ignore-scripts && \
+              npm run build-release && \
+              mkdir -p prebuilds && \
+              cp build/Release/better_sqlite3.node prebuilds/${{ matrix.target }}.node && \
+              rm -rf build && \
+              node -e \"require('./lib')(':memory:').close()\""
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: prebuilds/${{ matrix.target }}.node
+          if-no-files-found: error
